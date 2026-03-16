@@ -158,12 +158,12 @@ resource "aws_iam_role_policy_attachment" "ec2_ssm_attach" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
-# # Create an instance profile for the EC2 instance to allow it to use the IAM role created above. This is necessary for
-# # the EC2 instance to be able to assume the role and use the permissions granted by it when it is launched.
-# resource "aws_iam_instance_profile" "ec2_instance_profile" {
-#   name = "${var.prefix}-remote-ec2-profile"
-#   role = aws_iam_role.ec2_instance_role.name
-# }
+# Create an instance profile for the EC2 instance to allow it to use the IAM role created above. This is necessary for
+# the EC2 instance to be able to assume the role and use the permissions granted by it when it is launched.
+resource "aws_iam_instance_profile" "ec2_instance_profile" {
+  name = "${var.prefix}-remote-ec2-profile"
+  role = aws_iam_role.ec2_instance_role.name
+}
 
 # Security group allowing SSH.
 resource "aws_security_group" "ssh" {
@@ -191,9 +191,9 @@ resource "aws_security_group" "ssh" {
 # use the permissions granted by it. The instance will have a public IP address for SSH access and EKS cluster
 # communication.
 resource "aws_instance" "remote" {
-  ami           = var.ami_id
-  instance_type = var.instance_type
-  # iam_instance_profile        = aws_iam_instance_profile.ec2_instance_profile.name
+  ami                         = var.ami_id
+  instance_type               = var.instance_type
+  iam_instance_profile        = aws_iam_instance_profile.ec2_instance_profile.name
   subnet_id                   = aws_subnet.public.id
   vpc_security_group_ids      = [aws_security_group.ssh.id]
   associate_public_ip_address = true
@@ -257,8 +257,8 @@ resource "null_resource" "provision" {
       "sudo chmod +x /usr/local/bin/kubectl",
 
       # Configure AWS CLI access.
-      "aws sts get-caller-identity | cat",
       "aws eks update-kubeconfig --name \"${var.cluster_name}\" --region \"${var.region}\"",
+      "aws sts get-caller-identity | cat",
 
       # Install Terraform CLI.
       "sudo apt update -y",
