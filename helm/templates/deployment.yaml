@@ -1,0 +1,33 @@
+# Helm template for Kubernetes Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ec2-runner.fullname" . }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ include "ec2-runner.name" . }}
+  template:
+    metadata:
+      labels:
+        app: {{ include "ec2-runner.name" . }}
+    spec:
+      serviceAccountName: {{ include "ec2-runner.fullname" . }}
+      containers:
+        - name: runner
+          image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+          command: ["python3", "/app/runner.py"]
+          env:
+            - name: AWS_REGION
+              value: {{ .Values.aws.region | quote }}
+            - name: AMI_ID
+              value: {{ .Values.aws.amiId | quote }}
+            - name: INSTANCE_TYPE
+              value: {{ .Values.aws.instanceType | quote }}
+            - name: WAIT_SECONDS
+              value: {{ .Values.waitSeconds | quote }}
+            - name: SUBNET_ID
+              value: {{ .Values.subnetId | quote }}
+            - name: SECURITY_GROUP_ID
+              value: {{ .Values.securityGroupId | quote }}

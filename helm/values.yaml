@@ -1,0 +1,18 @@
+image:
+  repository: 375530451228.dkr.ecr.us-east-2.amazonaws.com/ec2-runner
+  tag: latest
+aws:
+  region: us-east-2
+  amiId: ami-00399ec92321828f5 # Amazon Linux 2 AMI for Ubuntu 20.04 for us-east-2
+  instanceType: t2.micro
+waitSeconds: 60
+
+# IRSA role ARN for service account annotation
+irsa:
+  roleArn: "" # Fill the IAM role ARN for IRSA here, e.g., arn:aws:iam::123456789012:role/your-irsa-role
+
+prefix: ""
+
+# Network configuration for EC2 runner
+subnetId: "" # Fill with the public subnet ID
+securityGroupId: "" # Fill with the SSH security group ID
