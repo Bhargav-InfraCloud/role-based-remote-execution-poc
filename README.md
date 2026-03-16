@@ -10,7 +10,8 @@
 
 ## Step 1: IAM Policy Setup
 
-Create and attach the minimal IAM policy [iam/user-runner-policy.json](iam/user-runner-policy.json) to your IAM user:
+Create and attach the minimal IAM policy [role-based-remote-execution-user-policy.json][user-policy-path] to your IAM
+user:
 
 ```sh
 make policy-create
@@ -18,7 +19,7 @@ make policy-attach
 ```
 
 This will:
-1. Create the IAM policy in AWS from [iam/user-runner-policy.json](iam/user-runner-policy.json).
+1. Create the IAM policy in AWS from [role-based-remote-execution-user-policy.json][user-policy-path].
 2. Attach the policy to your IAM user.
 3. List all policies attached to your IAM user.
 
@@ -109,3 +110,7 @@ make policy-detach
 make policy-delete
 make ecr-repo-delete
 ```
+
+---
+
+[user-policy-path]: iam/role-based-remote-execution-user-policy.json

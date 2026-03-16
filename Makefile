@@ -78,7 +78,7 @@ docker-push:
 # ---------------------
 
 POLICY_NAME = $(PREFIX)-user-runner-policy
-POLICY_FILE = iam/user-runner-policy.json
+POLICY_FILE = iam/role-based-remote-execution-user-policy.json
 IAM_USER_NAME ?= BhargavSandbox
 
 .PHONY: policy-create policy-attach policy-detach policy-delete policy-recreate
