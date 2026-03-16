@@ -114,6 +114,16 @@ policy-detach:
 		--profile $(AWS_PROFILE) | cat
 
 policy-delete:
+	aws iam list-policy-versions \
+		--policy-arn arn:aws:iam::$(AWS_ACCOUNT_ID):policy/$(POLICY_NAME) \
+		--query 'Versions[?IsDefaultVersion==`false`].VersionId' \
+		--output text \
+		--profile $(AWS_PROFILE) | \
+		tr '\t' '\n' | \
+		xargs -r -I{} aws iam delete-policy-version \
+			--policy-arn arn:aws:iam::$(AWS_ACCOUNT_ID):policy/$(POLICY_NAME) \
+			--version-id {} \
+			--profile $(AWS_PROFILE) | cat
 	aws iam delete-policy \
 		--policy-arn arn:aws:iam::$(AWS_ACCOUNT_ID):policy/$(POLICY_NAME) \
 		--profile $(AWS_PROFILE) | cat
