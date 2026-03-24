@@ -8,4 +8,7 @@ module "remote_core" {
   ssh_key_pair_name    = "bhargav-ec2-runner-key"
   ssh_private_key_path = "../../keys/bhargav-ec2-runner-key.pem"
   prefix               = "bhargav"
+  github_pat           = "TODO"
+  github_user          = "Bhargav-Infracloud"
+  license_file_path    = "/home/bhargav-ravuri/InfraCloud/Exostellar/license.InfraCloud_Exostellar.json"
 }

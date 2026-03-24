@@ -42,3 +42,23 @@ variable "ssh_private_key_path" {
   description = "Path to SSH private key file"
   type        = string
 }
+
+variable "github_pat" {
+  description = "GitHub Personal Access Token for cloning private repositories"
+  type        = string
+  # TODO :: Bhargav :: If this is sensitive, all user data steps executed on the bastion host will be masked/redacted.
+  #                    To minimize redaction, order the steps carefully and isolate those that require the token, then
+  #                    set this to true.
+  sensitive = false
+}
+
+variable "github_user" {
+  description = "GitHub username for authentication"
+  type        = string
+}
+
+variable "license_file_path" {
+  description = "Path to the license file to copy to the bastion host"
+  type        = string
+  default     = ""
+}

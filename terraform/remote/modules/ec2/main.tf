@@ -103,59 +103,68 @@ resource "aws_iam_role" "ec2_instance_role" {
   })
 }
 
-# Attach least-privilege policy for the remote EC2 instance.
-resource "aws_iam_policy" "minimal_policy" {
-  # The name of the IAM policy, which includes the prefix variable for easy identification and to avoid naming
-  # conflicts.
-  name        = "${var.prefix}-minimal-policy"
-  description = "Allow minimal access for remote instance."
 
-  # The policy document grants only the permissions needed for the EC2 instance to manage EKS and related AWS resources.
-  # This follows the principle of least privilege.
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "ec2:DescribeSubnets",
-          "ec2:DescribeVpcAttribute",
-          "ec2:DescribeVpcs",
-          "eks:DescribeCluster",
-          "iam:AttachRolePolicy",
-          "iam:CreateOpenIDConnectProvider",
-          "iam:CreatePolicy",
-          "iam:CreateRole",
-          "iam:DeleteOpenIDConnectProvider",
-          "iam:DeletePolicy",
-          "iam:DeleteRole",
-          "iam:DetachRolePolicy",
-          "iam:GetOpenIDConnectProvider",
-          "iam:GetPolicy",
-          "iam:GetPolicyVersion",
-          "iam:GetRole",
-          "iam:ListAttachedRolePolicies",
-          "iam:ListInstanceProfilesForRole",
-          "iam:ListPolicyVersions",
-          "iam:ListRolePolicies",
-          "iam:TagOpenIDConnectProvider",
-        ]
-        Resource = "*"
-      }
-    ]
-  })
+# Read the node groups in the EKS cluster.
+data "aws_eks_node_groups" "cluster_node_groups" {
+  # Read the node groups of the EKS cluster.
+  cluster_name = var.cluster_name
 }
 
-# Attach the minimal policy to allow the EC2 instance to manage EKS and related AWS resources with least privilege.
-resource "aws_iam_role_policy_attachment" "minimal_policy_attach" {
-  role       = aws_iam_role.ec2_instance_role.name
-  policy_arn = aws_iam_policy.minimal_policy.arn
+data "aws_eks_node_group" "first_node_group" {
+  # Read the first node group of the EKS cluster based on the cluster name and node group name.
+  cluster_name    = var.cluster_name
+  node_group_name = tolist(data.aws_eks_node_groups.cluster_node_groups.names)[0]
 }
 
-# Attach the SSM policy to allow secure remote management of the EC2 instance using AWS Systems Manager.
-resource "aws_iam_role_policy_attachment" "ec2_ssm_attach" {
+# Read the helm-auth policy file without placeholders.
+data "local_file" "helm_auth_policy" {
+  filename = "${path.module}/policy/helm-auth-policy.json"
+}
+
+# Read the terraform-modules policy file with placeholders and render them.
+data "local_file" "terraform_modules_policy_template" {
+  filename = "${path.module}/policy/terraform-modules-policy.json"
+}
+
+# Render the terraform-modules policy by replacing placeholders with actual values.
+locals {
+  terraform_modules_policy_rendered = templatefile(
+    data.local_file.terraform_modules_policy_template.filename,
+    {
+      aws_account_id      = data.aws_caller_identity.current.account_id
+      aws_resource_prefix = var.prefix
+      eks_cluster_name    = var.cluster_name
+    }
+  )
+}
+
+# Get current AWS account ID for use in policy rendering.
+data "aws_caller_identity" "current" {}
+
+# Create helm-auth policy for the remote EC2 instance.
+resource "aws_iam_policy" "helm_auth_policy" {
+  name        = "${var.prefix}-helm-auth-policy"
+  description = "Allow ECR Public and STS access for Helm authentication."
+  policy      = data.local_file.helm_auth_policy.content
+}
+
+# Create terraform-modules policy for the remote EC2 instance with rendered placeholders.
+resource "aws_iam_policy" "terraform_modules_policy" {
+  name        = "${var.prefix}-terraform-modules-policy"
+  description = "Allow Terraform to manage EC2, IAM, and EKS resources."
+  policy      = local.terraform_modules_policy_rendered
+}
+
+# Attach the helm-auth policy to the EC2 instance role.
+resource "aws_iam_role_policy_attachment" "helm_auth_policy_attach" {
   role       = aws_iam_role.ec2_instance_role.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+  policy_arn = aws_iam_policy.helm_auth_policy.arn
+}
+
+# Attach the terraform-modules policy to the EC2 instance role.
+resource "aws_iam_role_policy_attachment" "terraform_modules_policy_attach" {
+  role       = aws_iam_role.ec2_instance_role.name
+  policy_arn = aws_iam_policy.terraform_modules_policy.arn
 }
 
 # Create an instance profile for the EC2 instance to allow it to use the IAM role created above. This is necessary for
@@ -228,9 +237,29 @@ resource "aws_eks_access_policy_association" "bastion_admin" {
   }
 }
 
+
+
 # Run commands inside the instance to set up the environment.
 resource "null_resource" "provision" {
   depends_on = [aws_instance.remote]
+
+  # Wait for SSH to be ready and verify connectivity.
+  provisioner "remote-exec" {
+    connection {
+      type        = "ssh"
+      host        = aws_instance.remote.public_ip
+      user        = "ubuntu"
+      private_key = file(var.ssh_private_key_path)
+      timeout     = "2m"
+    }
+    inline = ["echo 'SSH connection established'"]
+  }
+
+  # Copy license file to the bastion host if provided (using local-exec with scp).
+  provisioner "local-exec" {
+    command = var.license_file_path != "" ? "scp -o StrictHostKeyChecking=no -i ${var.ssh_private_key_path} ${var.license_file_path} ubuntu@${aws_instance.remote.public_ip}:/home/ubuntu/license.InfraCloud_Exostellar.json" : "echo 'No license file provided'"
+  }
+
   provisioner "remote-exec" {
     connection {
       type        = "ssh"
@@ -243,29 +272,63 @@ resource "null_resource" "provision" {
       "sudo apt update -y",
       "sudo apt upgrade -y",
       "sudo apt autoremove -y",
-      "sudo apt install -y make tree",
+      "sudo apt install -y make tree jq unzip wget",
 
-      # Install AWS CLI v2, if not already installed.
-      "if ! command -v aws >/dev/null; then",
-      "  curl https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o awscliv2.zip",
-      "  unzip awscliv2.zip",
-      "  sudo ./aws/install",
-      "fi",
+      # Install Helm
+      "wget https://get.helm.sh/helm-v3.14.0-linux-amd64.tar.gz",
+      "tar -xvf helm-v3.14.0-linux-amd64.tar.gz",
+      "sudo mv linux-amd64/helm /usr/local/bin/helm",
+      "helm version",
+
+      # Install AWS CLI v2
+      "curl \"https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip\" -o \"awscliv2.zip\"",
+      "unzip awscliv2.zip",
+      "sudo ./aws/install",
+      "aws --version",
 
       # Install kubectl.
       "sudo curl -o /usr/local/bin/kubectl https://dl.k8s.io/release/v1.32.0/bin/linux/amd64/kubectl",
       "sudo chmod +x /usr/local/bin/kubectl",
 
+      # Force install Terraform CLI v1.8.x
+      "sudo rm -f /usr/local/bin/terraform",
+      "wget https://releases.hashicorp.com/terraform/1.9.5/terraform_1.9.5_linux_amd64.zip",
+      "unzip terraform_1.9.5_linux_amd64.zip",
+      "sudo mv terraform /usr/local/bin/",
+      "terraform version",
+
       # Configure AWS CLI access.
       "aws eks update-kubeconfig --name \"${var.cluster_name}\" --region \"${var.region}\"",
       "aws sts get-caller-identity | cat",
 
-      # Install Terraform CLI.
-      "sudo apt update -y",
-      "sudo apt install -y unzip wget",
-      "wget https://releases.hashicorp.com/terraform/1.7.5/terraform_1.7.5_linux_amd64.zip",
-      "unzip terraform_1.7.5_linux_amd64.zip",
-      "sudo mv terraform /usr/local/bin/",
+      # Helm login to GHCR and ECR public.
+      "echo \"${var.github_pat}\" | helm registry login ghcr.io --username \"${var.github_user}\" --password-stdin",
+      "aws ecr-public get-login-password --region \"us-east-1\" | helm registry login --username \"AWS\" --password-stdin \"public.ecr.aws\"",
+
+      # Clone Exostellar Terraform modules repository.
+      "git clone https://${var.github_user}:${var.github_pat}@github.com/Exostellar/terraform-exostellar-modules.git",
+      "cd terraform-exostellar-modules",
+
+      # Exostellar Terraform modules - existing-cluster-flow - AMI base.
+      "cat << 'EOF' > examples/existing-cluster-flow/ami-base/main.tf",
+      "module \"existing_cluster_flow\" {",
+      "  source              = \"../../../modules/ami-base/existing-cluster-full\"",
+      "  eks_cluster         = \"${var.cluster_name}\"",
+      "  aws_region          = \"${var.region}\"",
+      "  ems_ami_id          = \"ami-008c5d01663a7cc11\"",
+      "  ssh_key_name        = \"${var.ssh_key_pair_name}\"",
+      "  license_filepath    = \"/home/ubuntu/license.InfraCloud_Exostellar.json\"",
+      "  aws_resource_prefix = \"${var.prefix}\"",
+      "}",
+      "EOF",
+      "cat examples/existing-cluster-flow/ami-base/main.tf",
+
+      # Install AWS EBS CSI driver, is missing.
+      "helm repo add aws-ebs-csi-driver https://kubernetes-sigs.github.io/aws-ebs-csi-driver",
+      "helm upgrade --install aws-ebs-csi-driver --namespace kube-system aws-ebs-csi-driver/aws-ebs-csi-driver --version 2.48.0",
+
+      # Configure AWS CNI and AWS CSI.
+      "./scripts/common/configure-aws-cni-and-aws-csi.sh -n \"${var.cluster_name}\" --aws-resource-prefix \"${var.prefix}\""
     ]
   }
 }
